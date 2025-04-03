@@ -34,6 +34,7 @@ from boltz.model.modules.utils import (
     default,
     log,
 )
+from boltz.hooks import HOOKS_DISPATCHER
 
 
 class DiffusionModule(Module):
@@ -534,6 +535,16 @@ class AtomDiffusion(Module):
                 atom_coords_noisy
                 + self.step_scale * (sigma_t - t_hat) * denoised_over_sigma
             )
+
+            HOOKS_DISPATCHER.set_dict({
+                "sigma_tm": sigma_tm,
+                "sigma_t": sigma_t,
+                "gamma": gamma,
+                "atom_coords_noisy": atom_coords_noisy,
+                "atom_coords_denoised": atom_coords_denoised,
+                "atom_coords_next": atom_coords_next,
+            })
+            HOOKS_DISPATCHER.after_diffusion_step()
 
             atom_coords = atom_coords_next
 

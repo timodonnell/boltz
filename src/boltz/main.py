@@ -539,6 +539,18 @@ def cli() -> None:
     help="Pairing strategy to use. Used only if --use_msa_server is set. Options are 'greedy' and 'complete'",
     default="greedy",
 )
+@click.option(
+    "--hooks_file",
+    type=click.Path(exists=True),
+    help="Path to a hooks file (.py) to register additional hooks.",
+    default="",
+)
+@click.option(
+    "--hooks",
+    type=str,
+    help="A comma-separated list of hooks to use. Default is empty.",
+    default="",
+)
 def predict(
     data: str,
     out_dir: str,
@@ -559,6 +571,8 @@ def predict(
     use_msa_server: bool = False,
     msa_server_url: str = "https://api.colabfold.com",
     msa_pairing_strategy: str = "greedy",
+    hooks_file: Optional[str] = None,
+    hooks: Optional[str] = None,
 ) -> None:
     """Run predictions with Boltz-1."""
     # If cpu, write a friendly warning
