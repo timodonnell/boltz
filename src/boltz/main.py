@@ -376,12 +376,15 @@ def filter_inputs_affinity(
     """
     click.echo("Checking input data for affinity.")
 
-    # Get all affinity targets
+    affinity_manifest = Manifest([r for r in manifest.records if r.affinity])
+
+    if not affinity_manifest.records:
+        return affinity_manifest
+
     existing = {
         r.id
-        for r in manifest.records
-        if r.affinity
-        and (outdir / "predictions" / r.id / f"affinity_{r.id}.json").exists()
+        for r in affinity_manifest.records
+        if (outdir / "predictions" / r.id / f"affinity_{r.id}.json").exists()
     }
 
     # Remove them from the input data
@@ -394,11 +397,14 @@ def filter_inputs_affinity(
             "affinity predictions, please set the --override flag."
         )
         click.echo(msg)
+        affinity_manifest = Manifest(
+            [r for r in affinity_manifest.records if r.id not in existing]
+        )
     elif existing and override:
         msg = "Found existing affinity predictions, will override."
         click.echo(msg)
 
-    return Manifest([r for r in manifest.records if r.id not in existing])
+    return affinity_manifest
 
 
 def compute_msa(
@@ -1042,6 +1048,11 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         outdir=out_dir,
         override=override,
     )
+    filtered_manifest_affinity = filter_inputs_affinity(
+        manifest=manifest,
+        outdir=out_dir,
+        override=override,
+    )
 
     # Load processed data
     processed_dir = out_dir / "processed"
@@ -1070,25 +1081,23 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         devices = torch.cuda.device_count()
 
     num_requested_devices = devices if isinstance(devices, int) else len(devices)
+    num_predictions = max(len(filtered_manifest.records), len(filtered_manifest_affinity.records))
 
-    if filtered_manifest.records and len(filtered_manifest.records) < num_requested_devices:
+    if num_predictions > 0 and num_predictions < num_requested_devices:
         msg = (
             "Number of requested devices is greater "
             "than the number of predictions, taking the minimum."
         )
         click.echo(msg)
         if isinstance(devices, list):
-            devices = devices[: max(1, len(filtered_manifest.records))]
+            devices = devices[: max(1, num_predictions)]
         else:
-            devices = max(1, len(filtered_manifest.records))
+            devices = max(1, num_predictions)
 
     num_devices = devices if isinstance(devices, int) else len(devices)
     click.echo(f"Using {num_devices} of {torch.cuda.device_count()} available devices.")
 
-    if (
-        num_requested_devices < torch.cuda.device_count()
-        and len(filtered_manifest.records) > num_requested_devices
-    ):
+    if num_requested_devices < torch.cuda.device_count() and num_predictions > num_requested_devices:
         click.echo("Consider passing --devices=0 to use all available devices.")
 
     if num_devices > 1:
@@ -1203,22 +1212,12 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         )
 
     # Check if affinity predictions are needed
-    if any(r.affinity for r in manifest.records):
+    if filtered_manifest_affinity.records:
         # Print header
         click.echo("\nPredicting property: affinity\n")
 
-        # Validate inputs
-        manifest_filtered = filter_inputs_affinity(
-            manifest=manifest,
-            outdir=out_dir,
-            override=override,
-        )
-        if not manifest_filtered.records:
-            click.echo("Found existing affinity predictions for all inputs, skipping.")
-            return
-
-        msg = f"Running affinity prediction for {len(manifest_filtered.records)} input"
-        msg += "s." if len(manifest_filtered.records) > 1 else "."
+        msg = f"Running affinity prediction for {len(filtered_manifest_affinity.records)} input"
+        msg += "s." if len(filtered_manifest_affinity.records) > 1 else "."
         click.echo(msg)
 
         pred_writer = BoltzAffinityWriter(
@@ -1227,7 +1226,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         )
 
         data_module = Boltz2InferenceDataModule(
-            manifest=manifest_filtered,
+            manifest=filtered_manifest_affinity,
             target_dir=out_dir / "predictions",
             msa_dir=processed.msa_dir,
             mol_dir=mol_dir,
