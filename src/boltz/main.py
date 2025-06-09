@@ -760,7 +760,7 @@ def cli() -> None:
 @click.option(
     "--devices",
     type=int,
-    help="The number of devices to use for prediction. Default is 1.",
+    help="The number of devices to use for prediction. Default is 1. Pass 0 to use all available devices.",
     default=1,
 )
 @click.option(
@@ -1066,21 +1066,34 @@ def predict(  # noqa: C901, PLR0915, PLR0912
 
     # Set up trainer
     strategy = "auto"
-    if (isinstance(devices, int) and devices > 1) or (
-        isinstance(devices, list) and len(devices) > 1
+    if devices == 0:
+        devices = torch.cuda.device_count()
+
+    num_requested_devices = devices if isinstance(devices, int) else len(devices)
+
+    if filtered_manifest.records and len(filtered_manifest.records) < num_requested_devices:
+        msg = (
+            "Number of requested devices is greater "
+            "than the number of predictions, taking the minimum."
+        )
+        click.echo(msg)
+        if isinstance(devices, list):
+            devices = devices[: max(1, len(filtered_manifest.records))]
+        else:
+            devices = max(1, len(filtered_manifest.records))
+
+    num_devices = devices if isinstance(devices, int) else len(devices)
+    click.echo(f"Using {num_devices} of {torch.cuda.device_count()} available devices.")
+
+    if (
+        num_requested_devices < torch.cuda.device_count()
+        and len(filtered_manifest.records) > num_requested_devices
     ):
+        click.echo("Consider passing --devices=0 to use all available devices.")
+
+    if num_devices > 1:
         start_method = "fork" if platform.system() != "win32" else "spawn"
         strategy = DDPStrategy(start_method=start_method)
-        if len(filtered_manifest.records) < devices:
-            msg = (
-                "Number of requested devices is greater "
-                "than the number of predictions, taking the minimum."
-            )
-            click.echo(msg)
-            if isinstance(devices, list):
-                devices = devices[: max(1, len(filtered_manifest.records))]
-            else:
-                devices = max(1, min(len(filtered_manifest.records), devices))
 
     # Set up model parameters
     if model == "boltz2":
